@@ -1,0 +1,14 @@
+node_modules/*
+
+.vscode
+
+.webstorm
+
+.DS_Store
+
+.env.local
+
+.env.development
+
+.env.production
+
