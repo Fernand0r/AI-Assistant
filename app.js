@@ -18,63 +18,13 @@ const installations = new Map()
 // Store for chat histories
 const chatHistories = new Map();
 
-// Initialize your app with OAuth
+// Initialize the app
 const app = new App({
+	token: process.env.SLACK_BOT_TOKEN,
 	signingSecret: process.env.SLACK_SIGNING_SECRET,
-	clientId: process.env.SLACK_CLIENT_ID,
-	clientSecret: process.env.SLACK_CLIENT_SECRET,
-	stateSecret: 'my-state-secret',
-	scopes: [
-		'commands',
-		'chat:write',
-		'im:write',
-		'im:history',
-		'channels:history',
-		'users:read'
-	],
-	installationStore: {
-		storeInstallation: async (installation) => {
-			if (installation.isEnterpriseInstall && installation.enterprise !== undefined) {
-					installations.set(installation.enterprise.id, installation)
-					return
-			}
-			installations.set(installation.team.id, installation)
-			if (installation.user && installation.user.token) {
-				installations.set(`${installation.team.id}-${installation.user.id}`, installation)
-			}
-			return
-		},
-		fetchInstallation: async (installQuery) => {
-			let installation
-			if (installQuery.isEnterpriseInstall && installQuery.enterpriseId !== undefined) {
-				installation = installations.get(installQuery.enterpriseId)
-			} else {
-				installation = installations.get(installQuery.teamId)
-				if (installQuery.userId) {
-					const userInstallation = installations.get(`${installQuery.teamId}-${installQuery.userId}`)
-					if (userInstallation) {
-						return userInstallation
-					}
-				}
-			}
-			
-			if (installation) {
-				return installation
-			}
-			
-			return {
-				botToken: process.env.SLACK_BOT_TOKEN,
-				botId: installQuery.botId,
-				botUserId: installQuery.botUserId,
-				teamId: installQuery.teamId
-			}
-		},
-	},
-	installerOptions: {
-		directInstall: true,
-		userScopes: ['chat:write']
-	}
-})
+	socketMode: false,
+	appToken: process.env.SLACK_APP_TOKEN
+});
 
 // Function to polish message using OpenAI
 async function polishMessage(message) {
@@ -320,13 +270,18 @@ async function getChatResponse(userId, message, history = []) {
 		const messages = [
 			{
 				role: "system",
-				content: "You are a helpful assistant. Format your responses using Slack-compatible markdown when appropriate:\n" +
-						"- Use *bold* for emphasis\n" +
-						"- Use `code` for code snippets or technical terms\n" +
-						"- Use ```language\ncode block``` for multi-line code\n" +
-						"- Use > for quotes\n" +
-						"- Use • or - for bullet points\n" +
-						"Be concise but thorough in your responses."
+				content: "You are a knowledgeable AI Assistant specializing in software development and technical topics. Format your responses using Slack-compatible markdown:\n" +
+						"- Use *bold* for emphasis and important concepts\n" +
+						"- Use `code` for inline code, commands, and technical terms\n" +
+						"- Use ```language\ncode block``` for multi-line code examples\n" +
+						"- Use > for important notes or quotes\n" +
+						"- Use • or - for bullet points\n\n" +
+						"When answering questions:\n" +
+						"1. Start with a brief explanation of the concept\n" +
+						"2. Provide practical examples when relevant\n" +
+						"3. Include best practices and common pitfalls\n" +
+						"4. Add helpful tips or additional resources\n" +
+						"Be thorough but concise, and focus on practical, actionable advice."
 			},
 			...history,
 			{ role: "user", content: message }
@@ -613,6 +568,77 @@ app.view('gpt_chat_modal', async ({ ack, body, view, client }) => {
 					emoji: true
 				}
 			}
+		});
+	}
+});
+
+// Handle app mentions (@AI Assistant)
+app.event('app_mention', async ({ event, client, say }) => {
+	try {
+		// Extract the question (remove the bot mention)
+		const question = event.text.replace(/<@[^>]+>/, '').trim();
+		
+		if (!question) {
+			await client.chat.postMessage({
+				token: process.env.SLACK_BOT_TOKEN,
+				channel: event.channel,
+				thread_ts: event.thread_ts || event.ts,
+				text: "Hello! 👋 I'm your AI Assistant. You can ask me any technical questions, and I'll help you out. For example:\n" +
+					 "• How to configure a package.json?\n" +
+					 "• What are the best practices for error handling?\n" +
+					 "• How to implement authentication?"
+			});
+			return;
+		}
+
+		// Show typing indicator
+		const typingResponse = await client.chat.postMessage({
+			token: process.env.SLACK_BOT_TOKEN,
+			channel: event.channel,
+			thread_ts: event.thread_ts || event.ts,
+			text: "✨ *Processing your question...* ✨"
+		});
+
+		// Get response from GPT with technical context
+		const { response } = await getChatResponse(event.user, 
+			`Technical question about: ${question}\n` +
+			`Please provide a detailed, well-structured answer with examples where appropriate. ` +
+			`Use markdown formatting for code snippets and key points.`
+		);
+
+		// Update the typing message with the actual response
+		await client.chat.update({
+			token: process.env.SLACK_BOT_TOKEN,
+			channel: event.channel,
+			ts: typingResponse.ts,
+			text: response,
+			blocks: [
+				{
+					type: "section",
+					text: {
+						type: "mrkdwn",
+						text: response
+					}
+				},
+				{
+					type: "context",
+					elements: [
+						{
+							type: "mrkdwn",
+							text: "💡 _Feel free to ask follow-up questions in this thread!_"
+						}
+					]
+				}
+			]
+		});
+
+	} catch (error) {
+		console.error('Error handling app mention:', error);
+		await client.chat.postMessage({
+			token: process.env.SLACK_BOT_TOKEN,
+			channel: event.channel,
+			thread_ts: event.thread_ts || event.ts,
+			text: "Sorry, I encountered an error while processing your request. Please try again."
 		});
 	}
 });
