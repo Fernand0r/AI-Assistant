@@ -1,10 +1,5 @@
-const path = require('path');
-const dotenv = require('dotenv');
 const { spawn } = require('child_process');
 const ngrok = require('ngrok');
-
-// Load environment variables from .env.local
-dotenv.config({ path: path.join(__dirname, '.env.local') });
 
 // Start the Slack app
 const slackApp = spawn('node', ['app.js'], {
