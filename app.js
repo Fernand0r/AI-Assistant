@@ -6,19 +6,15 @@ const openai = new OpenAI({
 	apiKey: process.env.OPENAI_KEY,
 })
 
-// Store for installations
-const installations = new Map()
-
-// Store for chat histories
-const chatHistories = new Map();
+// Store for chat histories (consider using a proper database for production)
+const chatHistories = new Map()
 
 // Initialize the app
 const app = new App({
-	token: process.env.SLACK_BOT_TOKEN,
 	signingSecret: process.env.SLACK_SIGNING_SECRET,
-	socketMode: false,
-	appToken: process.env.SLACK_APP_TOKEN
-});
+	token: process.env.SLACK_BOT_TOKEN,
+	processBeforeResponse: true // Important for Vercel deployment
+})
 
 // Function to polish message using OpenAI
 async function polishMessage(message) {
@@ -638,11 +634,12 @@ app.event('app_mention', async ({ event, client, say }) => {
 });
 
 // Start your app
-;(async () => {
+(async () => {
 	try {
-		await app.start(process.env.PORT || 3000)
-		console.log('⚡️ Bolt app is running!')
+		await app.start(process.env.PORT || 3000);
+		console.log('⚡️ Bolt app is running!');
 	} catch (error) {
-		console.error('Error starting the app:', error)
+		console.error('Error starting the app:', error);
+		process.exit(1);
 	}
-})()
+})();
