@@ -16,8 +16,10 @@ const slackApp = spawn('node', ['app.js'], {
 			addr: 3000, // Port where your Slack app is running
 			proto: 'http',
 		})
-		console.log('🌍 Ngrok tunnel created:', url)
+		console.log('\n🌍 Ngrok tunnel created:', url)
 		console.log('⚡ Update your Slack app Request URL to:', url + '/slack/events')
+		console.log('🔄 Update your Interactivity & Shortcuts URL to:', url + '/slack/events')
+		console.log('📝 Update your Slash Commands URLs to:', url + '/slack/events')
 	} catch (error) {
 		console.error('Error starting ngrok:', error)
 		process.exit(1)
