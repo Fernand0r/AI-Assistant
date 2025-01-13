@@ -1,9 +1,11 @@
 const { App, LogLevel } = require('@slack/bolt')
 const OpenAI = require('openai')
 
-// Initialize OpenAI
+// Initialize OpenAI with custom configuration
 const openai = new OpenAI({
 	apiKey: process.env.OPENAI_KEY,
+	timeout: 60000, // 60 seconds timeout
+	maxRetries: 3, // Retry failed requests up to 3 times
 })
 
 // Store for chat histories (consider using a proper database for production)
@@ -14,9 +16,9 @@ const app = new App({
 	signingSecret: process.env.SLACK_SIGNING_SECRET,
 	token: process.env.SLACK_BOT_TOKEN,
 	// Enable request processing before response for Vercel
-	processBeforeResponse: process.env.NODE_ENV !== 'development',
+	processBeforeResponse: true,
 	// Custom logging
-	logLevel: process.env.NODE_ENV === 'development' ? LogLevel.DEBUG : LogLevel.WARN,
+	logLevel: LogLevel.WARN,
 })
 
 // Function to polish message using OpenAI
@@ -43,19 +45,19 @@ async function polishMessage(message) {
 						'• Preserve any technical terms or proper nouns\n' +
 						'• Keep the message concise but complete\n' +
 						'• For Chinese to English translation, add the original Chinese text in parentheses at the end\n' +
-						'• If making significant changes, briefly explain the improvements made'
+						'• If making significant changes, briefly explain the improvements made',
 				},
 				{
 					role: 'user',
-					content: message
-				}
-			]
-		});
+					content: message,
+				},
+			],
+		})
 
-		return completion.choices[0].message.content;
+		return completion.choices[0].message.content
 	} catch (error) {
-		console.error('OpenAI API error:', error);
-		throw error;
+		console.error('OpenAI API error:', error)
+		throw error
 	}
 }
 
@@ -132,7 +134,7 @@ app.command('/polish', async ({ command, ack, client, body }) => {
 						},
 					},
 					{
-						type: 'divider'
+						type: 'divider',
 					},
 					{
 						type: 'section',
@@ -187,11 +189,11 @@ app.command('/polish', async ({ command, ack, client, body }) => {
 
 // Handle regenerate button click
 app.action('regenerate_polish', async ({ ack, body, client }) => {
-	await ack();
+	await ack()
 
 	try {
-		const originalMessage = body.actions[0].value;
-		const newPolishedMessage = await polishMessage(originalMessage);
+		const originalMessage = body.actions[0].value
+		const newPolishedMessage = await polishMessage(originalMessage)
 
 		await client.views.update({
 			token: process.env.SLACK_BOT_TOKEN,
@@ -218,7 +220,7 @@ app.action('regenerate_polish', async ({ ack, body, client }) => {
 						},
 					},
 					{
-						type: 'divider'
+						type: 'divider',
 					},
 					{
 						type: 'section',
@@ -258,11 +260,11 @@ app.action('regenerate_polish', async ({ ack, body, client }) => {
 					polished_message: newPolishedMessage,
 				}),
 			},
-		});
+		})
 	} catch (error) {
-		console.error('Error handling regenerate action:', error);
+		console.error('Error handling regenerate action:', error)
 	}
-});
+})
 
 // Function to get chat response
 async function getChatResponse(userId, message, history = []) {
@@ -270,19 +272,18 @@ async function getChatResponse(userId, message, history = []) {
 		const messages = [
 			{
 				role: 'system',
-				content:
-					'You are a knowledgeable AI Assistant specializing in software development and technical topics. Format your responses using Slack-compatible markdown:\n' +
-					'- Use *bold* for bold text\n' +
-					'- Use _italic_ for italic text\n' +
-					'- Use ~strikethrough~ for strikethrough text\n' +
-					'- Use `inline code` for code, commands, and technical terms\n' +
-					'- Use > for single-line blockquotes\n' +
-					'- Use >>> for multiline blockquotes\n' +
-					'- For links, use <URL> to display the URL or <URL|Click here> for custom text\n' +
-					'- For unordered lists, use • followed by your text\n' +
-					'- For ordered lists, use 1. 2. 3. followed by your text\n' +
-					'- For code blocks, use ```language\nYour code here\n```\n' +
-					'- For emojis, use :emoji_name: (e.g., :smile: for 😊)\n\n' +
+				content: 
+					'You are a knowledgeable AI Assistant specializing in software development and technical topics. ' +
+					'IMPORTANT: Use ONLY these Slack-compatible markdown formats:\n' +
+					'- *text* for bold/emphasis (NOT ** or __)\n' +
+					'- _text_ for italics\n' +
+					'- ~text~ for strikethrough\n' +
+					'- `text` for inline code, commands, and technical terms\n' +
+					'- ```language\ncode\n``` for code blocks\n' +
+					'- > for single-line quotes\n' +
+					'- >>> for multi-line quotes\n' +
+					'- • or - for bullet points\n' +
+					'- 1. 2. 3. for numbered lists\n\n' +
 					'When answering questions:\n' +
 					'1. Start with a brief explanation of the concept\n' +
 					'2. Provide practical examples when relevant\n' +
@@ -297,6 +298,10 @@ async function getChatResponse(userId, message, history = []) {
 		const completion = await openai.chat.completions.create({
 			model: 'gpt-4',
 			messages: messages,
+			temperature: 0.7,
+			max_tokens: 2000,
+			presence_penalty: 0.1,
+			frequency_penalty: 0.1,
 		})
 
 		const response = completion.choices[0].message.content
@@ -306,6 +311,9 @@ async function getChatResponse(userId, message, history = []) {
 		}
 	} catch (error) {
 		console.error('OpenAI API error:', error)
+		if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+			throw new Error('The request took too long to process. Please try again with a shorter message or try again later.')
+		}
 		throw error
 	}
 }
@@ -349,6 +357,15 @@ app.command('/gpt', async ({ command, ack, client }) => {
 							type: 'mrkdwn',
 							text: '✨ *GPT is thinking...* ✨',
 						},
+					},
+					{
+						type: 'context',
+						elements: [
+							{
+								type: 'mrkdwn',
+								text: 'Your response will appear here shortly.',
+							},
+						],
 					},
 				],
 			},
@@ -421,11 +438,17 @@ app.command('/gpt', async ({ command, ack, client }) => {
 		})
 	} catch (error) {
 		console.error('Error opening GPT chat modal:', error)
+		let errorMessage = 'Sorry, there was an error processing your request. Please try again.'
+
+		if (error.message.includes('timeout') || error.message.includes('too long')) {
+			errorMessage = 'The request is still processing. Please wait for the response or try again with a shorter message.'
+		}
+
 		try {
 			await client.chat.postEphemeral({
 				channel: command.channel_id,
 				user: command.user_id,
-				text: 'Sorry, there was an error processing your request. Please try again.',
+				text: errorMessage,
 			})
 		} catch (postError) {
 			console.error('Error sending error message:', postError)
