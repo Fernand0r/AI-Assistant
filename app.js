@@ -264,16 +264,22 @@ app.action('regenerate_polish', async ({ ack, body, client }) => {
 	}
 })
 
+// Function to ensure correct Slack markdown formatting
+function formatForSlack(text) {
+	// Replace double asterisks with single asterisks for bold text
+	return text.replace(/\*\*(.*?)\*\*/g, '*$1*')
+}
+
 // Function to get chat response
 async function getChatResponse(userId, message, history = []) {
 	try {
 		const messages = [
 			{
 				role: 'system',
-				content: 
+				content:
 					'You are a knowledgeable AI Assistant specializing in software development and technical topics. ' +
-					'IMPORTANT: Format your responses using ONLY these Slack-compatible markdown formats:\n' +
-					'1. For bold text: Use *text* (NOT ** or __ - these are not supported)\n' +
+					'CRITICAL: You must use ONLY these Slack-compatible markdown formats:\n' +
+					'1. For bold text: Use *text* (NEVER use ** - it is not supported)\n' +
 					'2. For italic text: Use _text_ (single underscore only)\n' +
 					'3. For strikethrough: Use ~text~\n' +
 					'4. For code: Use `text` for inline, ```language\ncode\n``` for blocks\n' +
@@ -281,7 +287,7 @@ async function getChatResponse(userId, message, history = []) {
 					'6. For lists: Use • or - for bullet points, 1. 2. 3. for numbered\n' +
 					'7. For links: Use <URL> or <URL|text>\n' +
 					'8. For emojis: Use :emoji_name: (e.g., :smile:)\n\n' +
-					'NEVER use unsupported formats like **, __, or other non-Slack markdown.\n\n' +
+					'IMPORTANT: Always use single asterisk *like this* for bold text, never double asterisks.\n\n' +
 					'When answering questions:\n' +
 					'1. Start with a brief explanation\n' +
 					'2. Provide practical examples\n' +
@@ -290,26 +296,23 @@ async function getChatResponse(userId, message, history = []) {
 					'Be thorough but concise, and focus on practical advice.',
 			},
 			...history,
-			{ role: 'user', content: message }
-		];
+			{ role: 'user', content: message },
+		]
 
 		const completion = await openai.chat.completions.create({
 			model: 'gpt-3.5-turbo',
 			messages: messages,
-		});
+		})
 
-		const response = completion.choices[0].message.content;
+		// Format the response to ensure correct Slack markdown
+		const response = formatForSlack(completion.choices[0].message.content)
 		return {
 			response,
-			updatedHistory: [
-				...history,
-				{ role: 'user', content: message },
-				{ role: 'assistant', content: response }
-			]
-		};
+			updatedHistory: [...history, { role: 'user', content: message }, { role: 'assistant', content: response }],
+		}
 	} catch (error) {
-		console.error('OpenAI API error:', error);
-		throw error;
+		console.error('OpenAI API error:', error)
+		throw error
 	}
 }
 
@@ -320,18 +323,18 @@ app.command('/gpt', async ({ command, ack, client }) => {
 		await ack({
 			response_type: 'in_channel',
 			text: 'Processing your request...',
-		});
+		})
 
-		const userId = command.user_id;
-		const message = command.text;
+		const userId = command.user_id
+		const message = command.text
 
 		if (!message) {
 			await client.chat.postEphemeral({
 				channel: command.channel_id,
 				user: userId,
 				text: 'Please provide a message with the /gpt command',
-			});
-			return;
+			})
+			return
 		}
 
 		// Open modal with loading state first
@@ -364,12 +367,12 @@ app.command('/gpt', async ({ command, ack, client }) => {
 					},
 				],
 			},
-		});
+		})
 
 		// Get chat response in a separate try-catch block
 		try {
-			const { response, updatedHistory } = await getChatResponse(userId, message);
-			chatHistories.set(userId, updatedHistory);
+			const { response, updatedHistory } = await getChatResponse(userId, message)
+			chatHistories.set(userId, updatedHistory)
 
 			// Update modal with response
 			await client.views.update({
@@ -431,10 +434,10 @@ app.command('/gpt', async ({ command, ack, client }) => {
 						text: 'Close',
 					},
 				},
-			});
+			})
 		} catch (gptError) {
 			// Only show error in modal if we failed to get a response
-			console.error('Error getting GPT response:', gptError);
+			console.error('Error getting GPT response:', gptError)
 			await client.views.update({
 				token: process.env.SLACK_BOT_TOKEN,
 				view_id: modalResponse.view.id,
@@ -458,10 +461,10 @@ app.command('/gpt', async ({ command, ack, client }) => {
 						text: 'Close',
 					},
 				},
-			});
+			})
 		}
 	} catch (error) {
-		console.error('Error in /gpt command:', error);
+		console.error('Error in /gpt command:', error)
 		// Only send error message if we failed to open the modal
 		if (!error.message.includes('operation_timeout')) {
 			try {
@@ -469,13 +472,13 @@ app.command('/gpt', async ({ command, ack, client }) => {
 					channel: command.channel_id,
 					user: command.user_id,
 					text: 'Sorry, there was an error starting the conversation. Please try again.',
-				});
+				})
 			} catch (postError) {
-				console.error('Error sending error message:', postError);
+				console.error('Error sending error message:', postError)
 			}
 		}
 	}
-});
+})
 
 // Handle GPT chat modal submission
 app.view('gpt_chat_modal', async ({ ack, body, view, client }) => {
