@@ -294,12 +294,8 @@ async function getChatResponse(userId, message, history = []) {
 		];
 
 		const completion = await openai.chat.completions.create({
-			model: 'gpt-4',
+			model: 'gpt-3.5-turbo',
 			messages: messages,
-			temperature: 0.7,
-			max_tokens: 2000,
-			presence_penalty: 0.1,
-			frequency_penalty: 0.1,
 		});
 
 		const response = completion.choices[0].message.content;
