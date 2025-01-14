@@ -4,8 +4,6 @@ const OpenAI = require('openai')
 // Initialize OpenAI with custom configuration
 const openai = new OpenAI({
 	apiKey: process.env.OPENAI_KEY,
-	timeout: 60000, // 60 seconds timeout
-	maxRetries: 3, // Retry failed requests up to 3 times
 })
 
 // Store for chat histories (consider using a proper database for production)
@@ -274,26 +272,26 @@ async function getChatResponse(userId, message, history = []) {
 				role: 'system',
 				content: 
 					'You are a knowledgeable AI Assistant specializing in software development and technical topics. ' +
-					'IMPORTANT: Use ONLY these Slack-compatible markdown formats:\n' +
-					'- *text* for bold/emphasis (NOT ** or __)\n' +
-					'- _text_ for italics\n' +
-					'- ~text~ for strikethrough\n' +
-					'- `text` for inline code, commands, and technical terms\n' +
-					'- ```language\ncode\n``` for code blocks\n' +
-					'- > for single-line quotes\n' +
-					'- >>> for multi-line quotes\n' +
-					'- • or - for bullet points\n' +
-					'- 1. 2. 3. for numbered lists\n\n' +
+					'IMPORTANT: Format your responses using ONLY these Slack-compatible markdown formats:\n' +
+					'1. For bold text: Use *text* (NOT ** or __ - these are not supported)\n' +
+					'2. For italic text: Use _text_ (single underscore only)\n' +
+					'3. For strikethrough: Use ~text~\n' +
+					'4. For code: Use `text` for inline, ```language\ncode\n``` for blocks\n' +
+					'5. For quotes: Use > for single line, >>> for multiple lines\n' +
+					'6. For lists: Use • or - for bullet points, 1. 2. 3. for numbered\n' +
+					'7. For links: Use <URL> or <URL|text>\n' +
+					'8. For emojis: Use :emoji_name: (e.g., :smile:)\n\n' +
+					'NEVER use unsupported formats like **, __, or other non-Slack markdown.\n\n' +
 					'When answering questions:\n' +
-					'1. Start with a brief explanation of the concept\n' +
-					'2. Provide practical examples when relevant\n' +
-					'3. Include best practices and common pitfalls\n' +
-					'4. Add helpful tips or additional resources\n' +
-					'Be thorough but concise, and focus on practical, actionable advice.',
+					'1. Start with a brief explanation\n' +
+					'2. Provide practical examples\n' +
+					'3. Include best practices\n' +
+					'4. Add helpful resources\n' +
+					'Be thorough but concise, and focus on practical advice.',
 			},
 			...history,
-			{ role: 'user', content: message },
-		]
+			{ role: 'user', content: message }
+		];
 
 		const completion = await openai.chat.completions.create({
 			model: 'gpt-4',
@@ -302,41 +300,42 @@ async function getChatResponse(userId, message, history = []) {
 			max_tokens: 2000,
 			presence_penalty: 0.1,
 			frequency_penalty: 0.1,
-		})
+		});
 
-		const response = completion.choices[0].message.content
+		const response = completion.choices[0].message.content;
 		return {
 			response,
-			updatedHistory: [...history, { role: 'user', content: message }, { role: 'assistant', content: response }],
-		}
+			updatedHistory: [
+				...history,
+				{ role: 'user', content: message },
+				{ role: 'assistant', content: response }
+			]
+		};
 	} catch (error) {
-		console.error('OpenAI API error:', error)
-		if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-			throw new Error('The request took too long to process. Please try again with a shorter message or try again later.')
-		}
-		throw error
+		console.error('OpenAI API error:', error);
+		throw error;
 	}
 }
 
 // Handle /gpt command
 app.command('/gpt', async ({ command, ack, client }) => {
 	try {
-		// Acknowledge command immediately
+		// Acknowledge command with a longer timeout
 		await ack({
-			response_type: 'ephemeral',
+			response_type: 'in_channel',
 			text: 'Processing your request...',
-		})
+		});
 
-		const userId = command.user_id
-		const message = command.text
+		const userId = command.user_id;
+		const message = command.text;
 
 		if (!message) {
 			await client.chat.postEphemeral({
 				channel: command.channel_id,
 				user: userId,
 				text: 'Please provide a message with the /gpt command',
-			})
-			return
+			});
+			return;
 		}
 
 		// Open modal with loading state first
@@ -363,98 +362,124 @@ app.command('/gpt', async ({ command, ack, client }) => {
 						elements: [
 							{
 								type: 'mrkdwn',
-								text: 'Your response will appear here shortly.',
+								text: 'This might take a moment for longer responses.',
 							},
 						],
 					},
 				],
 			},
-		})
+		});
 
-		// Get chat response
-		const { response, updatedHistory } = await getChatResponse(userId, message)
-		chatHistories.set(userId, updatedHistory)
+		// Get chat response in a separate try-catch block
+		try {
+			const { response, updatedHistory } = await getChatResponse(userId, message);
+			chatHistories.set(userId, updatedHistory);
 
-		// Update modal with response
-		await client.views.update({
-			token: process.env.SLACK_BOT_TOKEN,
-			view_id: modalResponse.view.id,
-			view: {
-				type: 'modal',
-				callback_id: 'gpt_chat_modal',
-				title: {
-					type: 'plain_text',
-					text: 'Chat with GPT',
-				},
-				blocks: [
-					{
-						type: 'section',
-						text: {
-							type: 'mrkdwn',
-							text: '*You:*\n' + message,
-						},
+			// Update modal with response
+			await client.views.update({
+				token: process.env.SLACK_BOT_TOKEN,
+				view_id: modalResponse.view.id,
+				view: {
+					type: 'modal',
+					callback_id: 'gpt_chat_modal',
+					title: {
+						type: 'plain_text',
+						text: 'Chat with GPT',
 					},
-					{
-						type: 'divider',
-					},
-					{
-						type: 'section',
-						text: {
-							type: 'mrkdwn',
-							text: '*GPT:*\n' + response,
-						},
-					},
-					{
-						type: 'divider',
-					},
-					{
-						type: 'input',
-						block_id: 'message_input',
-						element: {
-							type: 'plain_text_input',
-							multiline: true,
-							action_id: 'message',
-							placeholder: {
-								type: 'plain_text',
-								text: 'Continue the conversation...',
+					blocks: [
+						{
+							type: 'section',
+							text: {
+								type: 'mrkdwn',
+								text: '*You:*\n' + message,
 							},
 						},
-						label: {
-							type: 'plain_text',
-							text: 'Your message',
-							emoji: true,
+						{
+							type: 'divider',
 						},
+						{
+							type: 'section',
+							text: {
+								type: 'mrkdwn',
+								text: '*GPT:*\n' + response,
+							},
+						},
+						{
+							type: 'divider',
+						},
+						{
+							type: 'input',
+							block_id: 'message_input',
+							element: {
+								type: 'plain_text_input',
+								multiline: true,
+								action_id: 'message',
+								placeholder: {
+									type: 'plain_text',
+									text: 'Continue the conversation...',
+								},
+							},
+							label: {
+								type: 'plain_text',
+								text: 'Your message',
+								emoji: true,
+							},
+						},
+					],
+					submit: {
+						type: 'plain_text',
+						text: 'Send Message',
 					},
-				],
-				submit: {
-					type: 'plain_text',
-					text: 'Send Message',
+					close: {
+						type: 'plain_text',
+						text: 'Close',
+					},
 				},
-				close: {
-					type: 'plain_text',
-					text: 'Close',
+			});
+		} catch (gptError) {
+			// Only show error in modal if we failed to get a response
+			console.error('Error getting GPT response:', gptError);
+			await client.views.update({
+				token: process.env.SLACK_BOT_TOKEN,
+				view_id: modalResponse.view.id,
+				view: {
+					type: 'modal',
+					title: {
+						type: 'plain_text',
+						text: 'Processing...',
+					},
+					blocks: [
+						{
+							type: 'section',
+							text: {
+								type: 'mrkdwn',
+								text: 'Still processing your request. Please wait or try again with a shorter message.',
+							},
+						},
+					],
+					close: {
+						type: 'plain_text',
+						text: 'Close',
+					},
 				},
-			},
-		})
-	} catch (error) {
-		console.error('Error opening GPT chat modal:', error)
-		let errorMessage = 'Sorry, there was an error processing your request. Please try again.'
-
-		if (error.message.includes('timeout') || error.message.includes('too long')) {
-			errorMessage = 'The request is still processing. Please wait for the response or try again with a shorter message.'
+			});
 		}
-
-		try {
-			await client.chat.postEphemeral({
-				channel: command.channel_id,
-				user: command.user_id,
-				text: errorMessage,
-			})
-		} catch (postError) {
-			console.error('Error sending error message:', postError)
+	} catch (error) {
+		console.error('Error in /gpt command:', error);
+		// Only send error message if we failed to open the modal
+		if (!error.message.includes('operation_timeout')) {
+			try {
+				await client.chat.postEphemeral({
+					channel: command.channel_id,
+					user: command.user_id,
+					text: 'Sorry, there was an error starting the conversation. Please try again.',
+				});
+			} catch (postError) {
+				console.error('Error sending error message:', postError);
+			}
 		}
 	}
-})
+});
 
 // Handle GPT chat modal submission
 app.view('gpt_chat_modal', async ({ ack, body, view, client }) => {
