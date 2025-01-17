@@ -320,10 +320,7 @@ async function getChatResponse(userId, message, history = []) {
 app.command('/gpt', async ({ command, ack, client }) => {
 	try {
 		// Acknowledge command with a longer timeout
-		await ack({
-			response_type: 'in_channel',
-			text: 'Processing your request...',
-		})
+		await ack()
 
 		const userId = command.user_id
 		const message = command.text
@@ -482,8 +479,13 @@ app.command('/gpt', async ({ command, ack, client }) => {
 
 // Handle GPT chat modal submission
 app.view('gpt_chat_modal', async ({ ack, body, view, client }) => {
-	await ack({
-		response_action: 'update',
+	// Simple acknowledgment first
+	await ack()
+
+	// Then update the view to show loading state
+	await client.views.update({
+		token: process.env.SLACK_BOT_TOKEN,
+		view_id: body.view.id,
 		view: {
 			type: 'modal',
 			title: {
